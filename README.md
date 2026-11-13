@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # NextTune (diseño de Figma Make + MySQL)
 
 Frontend: tu diseño de Figma Make (React + Tailwind), sin cambios visuales.
@@ -51,3 +52,7 @@ Pendiente (las tablas ya existen): Cola de reproducción, Recomendaciones y edic
 npm run build
 npm start        # http://localhost:3000
 ```
+=======
+# Nextune
+plataforma de música 
+>>>>>>> 0136c6615afdfa9d1eafa7643bf4b65f113acc80
