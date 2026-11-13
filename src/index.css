@@ -1,0 +1,132 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-ink: #0a0a0a;
+  --color-canvas: #121212;
+  --color-panel: #1e1e1e;
+  --color-panel-strong: #2a2a2a;
+  --color-line: #353535;
+  --color-muted: #b3b3b3;
+  --color-accent: #ff6a00;
+  --color-accent-bright: #ff812b;
+  --color-accent-soft: #2c180b;
+  --shadow-glow: 0 0 24px rgba(255, 106, 0, 0.28);
+  --shadow-glow-sm: 0 0 14px rgba(255, 106, 0, 0.2);
+  --shadow-card: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: #121212;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #121212;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.auth-input {
+  margin-top: 0.75rem;
+  height: 3rem;
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid #353535;
+  background: #121212;
+  padding: 0 1rem;
+  color: white;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 160ms ease;
+}
+
+.auth-input:focus {
+  border-color: #ff6a00;
+}
+
+.auth-input::placeholder {
+  color: #777;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.ml-17 {
+  margin-left: 4.25rem;
+}
+
+.player-range {
+  height: 0.35rem;
+  appearance: none;
+  border-radius: 999px;
+  background: linear-gradient(to right, #ff6a00 0%, #ff6a00 var(--progress, 40%), #353535 var(--progress, 40%), #353535 100%);
+  accent-color: #ff6a00;
+  cursor: pointer;
+}
+
+.player-range::-webkit-slider-thumb {
+  width: 0.9rem;
+  height: 0.9rem;
+  appearance: none;
+  border-radius: 50%;
+  background: #ff6a00;
+  box-shadow: 0 0 14px rgba(255, 106, 0, 0.45);
+}
+
+@keyframes splash {
+  0% { opacity: 0; transform: scale(.92); }
+  70% { opacity: 1; transform: scale(1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes load {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+.animate-splash {
+  animation: splash .75s ease-out both;
+}
+
+.animate-load {
+  animation: load .9s .1s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
