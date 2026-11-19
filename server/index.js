@@ -11,6 +11,7 @@ import { pool, q } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+app.use('/api/admin/canciones', express.json({ limit: '40mb' })); // audio + portada en base64
 app.use(express.json({ limit: '1mb' }));
 
 const sessions = new Map(); // token -> id_usuario (en memoria)
@@ -87,8 +88,15 @@ const auth = h(async (req, res, next) => {
 
 const adminOnly = (req, res, next) => (req.user.id_rol === 1 ? next() : fail(res, 403, 'Solo administradores'));
 
-async function activarPremium(uid) {
-  const [plan] = await q("SELECT * FROM Membresia WHERE nombre = 'Premium mensual' LIMIT 1");
+// El plan de pago NUNCA es "Gratis": se usa el id pedido o, por defecto, el Premium más corto
+async function planPremium(id) {
+  if (id) { const [p] = await q(`SELECT * FROM Membresia WHERE id_membresia = ? AND LOWER(nombre) NOT LIKE '%grat%'`, [Number(id)]); if (p) return p; }
+  const [p] = await q(`SELECT * FROM Membresia WHERE LOWER(nombre) NOT LIKE '%grat%' ORDER BY duracion_dias ASC, id_membresia ASC LIMIT 1`);
+  return p;
+}
+
+async function activarPremium(uid, idPlan) {
+  const plan = await planPremium(idPlan);
   const [vigente] = await q(
     `SELECT fecha_fin FROM Suscripcion
       WHERE id_usuario = ? AND estado = 'activa' AND fecha_fin >= CURDATE()
@@ -524,6 +532,13 @@ app.put('/api/me', auth, h(async (req, res) => {
   await q('UPDATE Usuario SET correo = ?, telefono = ?, fecha_nacimiento = ? WHERE id_usuario = ?',
     [correo, telefono || null, fecha_nacimiento || null, req.user.id_usuario]);
   res.json({ ok: true });
+}));
+
+app.put('/api/me/nombre', auth, h(async (req, res) => {
+  const nombre = String(req.body.nombre || '').trim().slice(0, 60);
+  if (nombre.length < 2) return fail(res, 400, 'Escribe un nombre válido');
+  await q('UPDATE Usuario SET nombre = ? WHERE id_usuario = ?', [nombre, req.user.id_usuario]);
+  res.json({ ok: true, nombre });
 }));
 
 // ---------- FAVORITOS ----------
@@ -982,13 +997,14 @@ app.post('/api/notificaciones/:id/responder', auth, h(async (req, res) => {
 
 // ---------- PAGOS ----------
 app.post('/api/pagos', auth, h(async (req, res) => {
-  const { metodo, tarjeta } = req.body;
+  const { metodo, tarjeta, id_plan } = req.body;
   const uid = req.user.id_usuario;
-  const [plan] = await q("SELECT * FROM Membresia WHERE nombre = 'Premium mensual' LIMIT 1");
+  const plan = await planPremium(id_plan);
+  if (!plan) return fail(res, 404, 'No hay un plan Premium configurado');
   const aprobado = !String(tarjeta || '').replace(/\s/g, '').endsWith('0');
   const r = await q('INSERT INTO Pago (monto, fecha_pago, metodo_pago, estado, id_usuario) VALUES (?, CURDATE(), ?, ?, ?)',
     [plan.precio, metodo || 'Tarjeta', aprobado ? 'aprobado' : 'rechazado', uid]);
-  if (aprobado) await activarPremium(uid);
+  if (aprobado) await activarPremium(uid, plan.id_membresia);
   const f = new Date().toISOString().slice(2, 10).replace(/-/g, '');
   res.json({ estado: aprobado ? 'aprobado' : 'rechazado', comprobante: `NT-${f}-${String(r.insertId).padStart(3, '0')}`, plan: plan.nombre, monto: plan.precio });
 }));
@@ -1064,6 +1080,121 @@ app.delete('/api/admin/usuarios/:id', auth, adminOnly, h(async (req, res) => {
 app.get('/api/admin/pagos', auth, adminOnly, h(async (_req, res) => {
   res.json(await q(`SELECT p.id_pago, u.nombre, p.monto, p.metodo_pago AS metodo, p.fecha_pago AS fecha, p.estado
                       FROM Pago p JOIN Usuario u ON u.id_usuario = p.id_usuario ORDER BY p.id_pago DESC LIMIT 100`));
+}));
+
+// ---------- PLANES (precio editable por el admin) ----------
+app.get('/api/planes', h(async (_req, res) => {
+  res.json(await q('SELECT id_membresia AS id, nombre, precio, duracion_dias AS dias FROM Membresia ORDER BY id_membresia'));
+}));
+
+app.put('/api/admin/planes/:id', auth, adminOnly, h(async (req, res) => {
+  const nombre = String(req.body.nombre || '').trim();
+  const precio = Number(req.body.precio);
+  const dias = Math.floor(Number(req.body.dias));
+  if (!nombre || !(precio > 0) || !(dias > 0)) return fail(res, 400, 'Nombre, precio y días deben ser válidos');
+  const [actual] = await q('SELECT nombre FROM Membresia WHERE id_membresia = ?', [Number(req.params.id)]);
+  if (actual && /grat/i.test(actual.nombre)) return fail(res, 400, 'El plan Gratis no se puede editar');
+  const r = await q('UPDATE Membresia SET nombre = ?, precio = ?, duracion_dias = ? WHERE id_membresia = ?', [nombre, precio, dias, Number(req.params.id)]);
+  if (!r.affectedRows) return fail(res, 404, 'Plan no encontrado');
+  res.json({ ok: true });
+}));
+
+// ---------- CATÁLOGO ADMIN (agregar / editar / eliminar canciones) ----------
+const AUDIO_DIR = path.join(__dirname, '..', 'public', 'audio');
+const COVERS_DIR = path.join(__dirname, '..', 'public', 'covers');
+const AUDIO_EXT = { 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'aac', 'audio/flac': 'flac', 'audio/webm': 'webm' };
+const IMG_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+
+// Guarda un data URL en disco y devuelve el nombre de archivo (o lanza Error con mensaje para el usuario)
+function guardarDataUrl(dataUrl, dir, extPermitidas, base) {
+  const m = /^data:([\w/+.-]+)(?:;[^,]*)?;base64,(.+)$/s.exec(String(dataUrl || ''));
+  if (!m) throw new Error('Archivo inválido');
+  const ext = extPermitidas[m[1].toLowerCase()];
+  if (!ext) throw new Error(`Formato no permitido (${m[1]})`);
+  fs.mkdirSync(dir, { recursive: true });
+  const slug = String(base || 'archivo').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 40) || 'archivo';
+  const nombre = `${slug}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+  fs.writeFileSync(path.join(dir, nombre), Buffer.from(m[2], 'base64'));
+  return nombre;
+}
+const borrarSiExiste = (p) => { try { fs.unlinkSync(p); } catch {} };
+
+async function idGeneroPorNombre(genre) {
+  const nombre = String(genre || '').trim();
+  if (!nombre || nombre.toLowerCase() === 'sin género') { const [g] = await q('SELECT id_genero FROM Genero ORDER BY id_genero LIMIT 1'); return g?.id_genero ?? 1; }
+  const [g] = await q('SELECT id_genero FROM Genero WHERE LOWER(nombre) = LOWER(?) LIMIT 1', [nombre]);
+  return g ? g.id_genero : (await q('INSERT INTO Genero (nombre) VALUES (?)', [nombre])).insertId;
+}
+async function idArtistaPorNombre(artist) {
+  const nombre = String(artist || '').trim();
+  const [a] = await q('SELECT id_artista FROM Artista WHERE LOWER(nombre) = LOWER(?) LIMIT 1', [nombre]);
+  return a ? a.id_artista : (await q('INSERT INTO Artista (nombre) VALUES (?)', [nombre])).insertId;
+}
+// "Sencillo" (o vacío) = álbum propio de esa canción, para que cada portada sea independiente
+async function idAlbumPara(album, idArtista, portada) {
+  const nombre = String(album || '').trim() || 'Sencillo';
+  if (nombre.toLowerCase() !== 'sencillo') {
+    const [a] = await q('SELECT id_album FROM Album WHERE LOWER(titulo) = LOWER(?) AND id_artista = ? LIMIT 1', [nombre, idArtista]);
+    if (a) { if (portada) await q('UPDATE Album SET portada = ? WHERE id_album = ?', [portada, a.id_album]); return a.id_album; }
+  }
+  return (await q('INSERT INTO Album (titulo, anio, portada, id_artista) VALUES (?, ?, ?, ?)', [nombre, new Date().getFullYear(), portada || null, idArtista])).insertId;
+}
+const cancionAdmin = async (id) => (await q(`${CANCIONES_SQL} WHERE c.id_cancion = ?`, [id]))[0];
+
+app.post('/api/admin/canciones', auth, adminOnly, h(async (req, res) => {
+  const { title, artist, album, genre, artwork, audio, audioName, duration } = req.body || {};
+  if (!String(title || '').trim() || !String(artist || '').trim()) return fail(res, 400, 'Falta el nombre o el artista');
+  if (!audio) return fail(res, 400, 'Sube el archivo de audio');
+  const [dup] = await q(`SELECT c.id_cancion FROM Cancion c JOIN Artista a ON a.id_artista = c.id_artista WHERE LOWER(c.titulo) = LOWER(?) AND LOWER(a.nombre) = LOWER(?) LIMIT 1`, [String(title).trim(), String(artist).trim()]);
+  if (dup) return fail(res, 409, 'Esa canción ya existe en el catálogo');
+  let archivo = null, portada = null;
+  try {
+    archivo = guardarDataUrl(audio, AUDIO_DIR, AUDIO_EXT, audioName ? path.parse(String(audioName)).name : title);
+    if (artwork) portada = '/covers/' + guardarDataUrl(artwork, COVERS_DIR, IMG_EXT, title);
+  } catch (e) { if (archivo) borrarSiExiste(path.join(AUDIO_DIR, archivo)); return fail(res, 400, e.message); }
+  const idArtista = await idArtistaPorNombre(artist);
+  const idAlbum = await idAlbumPara(album, idArtista, portada);
+  const r = await q(`INSERT INTO Cancion (titulo, duracion, archivo_audio, id_genero, id_album, id_artista) VALUES (?, ?, ?, ?, ?, ?)`,
+    [String(title).trim(), Math.max(1, Math.round(Number(duration) || 30)), archivo, await idGeneroPorNombre(genre), idAlbum, idArtista]);
+  res.json(sinIds(await cancionAdmin(r.insertId)));
+}));
+
+app.put('/api/admin/canciones/:id', auth, adminOnly, h(async (req, res) => {
+  const id = Number(req.params.id);
+  const [actual] = await q('SELECT * FROM Cancion WHERE id_cancion = ?', [id]);
+  if (!actual) return fail(res, 404, 'Canción no encontrada');
+  const { title, artist, album, genre, artwork, audio, audioName, duration } = req.body || {};
+  if (!String(title || '').trim() || !String(artist || '').trim()) return fail(res, 400, 'Falta el nombre o el artista');
+  let archivo = actual.archivo_audio, portada = null, audioNuevo = null;
+  try {
+    if (audio) { audioNuevo = guardarDataUrl(audio, AUDIO_DIR, AUDIO_EXT, audioName ? path.parse(String(audioName)).name : title); archivo = audioNuevo; }
+    if (artwork && String(artwork).startsWith('data:')) portada = '/covers/' + guardarDataUrl(artwork, COVERS_DIR, IMG_EXT, title);
+  } catch (e) { if (audioNuevo) borrarSiExiste(path.join(AUDIO_DIR, audioNuevo)); return fail(res, 400, e.message); }
+  const idArtista = await idArtistaPorNombre(artist);
+  const [albActual] = await q('SELECT * FROM Album WHERE id_album = ?', [actual.id_album]);
+  const nombreAlbum = String(album || '').trim() || 'Sencillo';
+  let idAlbum = actual.id_album;
+  if (!albActual || albActual.id_artista !== idArtista || albActual.titulo.toLowerCase() !== nombreAlbum.toLowerCase()) {
+    idAlbum = await idAlbumPara(nombreAlbum, idArtista, portada || albActual?.portada || null);
+  } else if (portada) {
+    await q('UPDATE Album SET portada = ? WHERE id_album = ?', [portada, idAlbum]);
+  }
+  await q('UPDATE Cancion SET titulo = ?, duracion = ?, archivo_audio = ?, id_genero = ?, id_album = ?, id_artista = ? WHERE id_cancion = ?',
+    [String(title).trim(), Math.max(1, Math.round(Number(duration) || actual.duracion || 30)), archivo, await idGeneroPorNombre(genre), idAlbum, idArtista, id]);
+  if (audioNuevo && actual.archivo_audio && !/^https?:\/\//i.test(actual.archivo_audio)) borrarSiExiste(path.join(AUDIO_DIR, path.basename(actual.archivo_audio)));
+  res.json(sinIds(await cancionAdmin(id)));
+}));
+
+app.delete('/api/admin/canciones/:id', auth, adminOnly, h(async (req, res) => {
+  const id = Number(req.params.id);
+  const [c] = await q('SELECT archivo_audio FROM Cancion WHERE id_cancion = ?', [id]);
+  if (!c) return fail(res, 404, 'Canción no encontrada');
+  for (const t of ['PlaylistCancion', 'Favorito', 'Descarga', 'Compartido', 'Letra', 'HistorialReproduccion']) {
+    try { await q(`DELETE FROM ${t} WHERE id_cancion = ?`, [id]); } catch (e) { console.warn(`(aviso) no se limpió ${t}:`, e.message); }
+  }
+  await q('DELETE FROM Cancion WHERE id_cancion = ?', [id]);
+  if (c.archivo_audio && !/^https?:\/\//i.test(c.archivo_audio)) borrarSiExiste(path.join(AUDIO_DIR, path.basename(c.archivo_audio)));
+  res.json({ ok: true });
 }));
 
 // ---------- CATÁLOGO EXTERNO ----------
@@ -1184,10 +1315,12 @@ app.get('/api/external/canciones', h(async (req, res) => {
 }));
 
 // ---------- FRONTEND COMPILADO ----------
+app.use('/audio', express.static(AUDIO_DIR));
+app.use('/covers', express.static(COVERS_DIR));
 const dist = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(dist)) {
   app.use(express.static(dist));
-  app.get(/^\/(?!api|audio).*/, (_req, res) => res.sendFile(path.join(dist, 'index.html')));
+  app.get(/^\/(?!api|audio|covers).*/, (_req, res) => res.sendFile(path.join(dist, 'index.html')));
 }
 
 const PORT = Number(process.env.PORT || 3000);

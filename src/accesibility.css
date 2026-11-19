@@ -1,0 +1,196 @@
+/* =====================================================================
+   NextTune · Accesibilidad y temas (archivo ADICIONAL, no reemplaza index.css)
+   Importar en main.tsx DESPUÉS de index.css:  import './accessibility.css'
+   Temas:  data-theme = dark | light | contrast   (se pone en <html>)
+   Texto:  data-text  = normal | large | xlarge
+   ===================================================================== */
+
+:root {
+  --fg: #ffffff;               /* texto principal */
+  --accent-text: #ff6a00;      /* naranja para TEXTO (en claro se oscurece) */
+  --focus: #ffb36b;            /* anillo de foco */
+  --input-border: #7a7a7a;     /* borde de campos (3:1 mínimo) */
+  --range-fill: #ff6a00;
+  --range-track: #353535;
+  color-scheme: dark;
+}
+
+/* ---------- TEMA CLARO ---------- */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-ink: #fbfaf8;
+  --color-canvas: #f4f2ef;
+  --color-panel: #ffffff;
+  --color-panel-strong: #ebe7e2;
+  --color-line: #d3cdc6;
+  --color-muted: #57524d;
+  --color-accent-soft: #ffe8d6;
+  --fg: #171512;
+  --accent-text: #b13c00;
+  --focus: #0b57d0;
+  --input-border: #8c867f;
+  --range-fill: #b13c00;
+  --range-track: #d3cdc6;
+}
+
+/* ---------- TEMA ALTO CONTRASTE (blanco y negro) ---------- */
+:root[data-theme="contrast"] {
+  color-scheme: dark;
+  --color-ink: #000000;
+  --color-canvas: #000000;
+  --color-panel: #0d0d0d;
+  --color-panel-strong: #1f1f1f;
+  --color-line: #ffffff;
+  --color-muted: #e6e6e6;
+  --color-accent: #ffa24d;
+  --color-accent-bright: #ffb978;
+  --color-accent-soft: #2a1700;
+  --fg: #ffffff;
+  --accent-text: #ffa24d;
+  --focus: #ffe14d;
+  --input-border: #ffffff;
+  --range-fill: #ffa24d;
+  --range-track: #ffffff;
+}
+
+html, body { background: var(--color-canvas); }
+body { color: var(--fg); }
+
+/* ---------- Superficies que SIEMPRE son oscuras (imágenes, video, degradados) ----------
+   Dentro de .on-dark los colores del tema claro se restauran a los del oscuro. */
+:root[data-theme="light"] .on-dark {
+  --color-ink: #0a0a0a;
+  --color-canvas: #121212;
+  --color-panel: #1e1e1e;
+  --color-panel-strong: #2a2a2a;
+  --color-line: #353535;
+  --color-muted: #b3b3b3;
+  --color-accent-soft: #2c180b;
+  --fg: #ffffff;
+  --accent-text: #ff6a00;
+  --input-border: #7a7a7a;
+}
+
+/* ---------- Texto en el tema claro ---------- */
+:root[data-theme="light"] .text-white,
+:root[data-theme="light"] .hover\:text-white:hover,
+:root[data-theme="light"] .group:hover .group-hover\:text-white { color: var(--fg); }
+
+:root[data-theme="light"] .text-accent,
+:root[data-theme="light"] .hover\:text-accent:hover,
+:root[data-theme="light"] .group:hover .group-hover\:text-accent { color: var(--accent-text); }
+
+:root[data-theme="light"] .text-red-300,
+:root[data-theme="light"] .text-red-400 { color: #b42318; }
+:root[data-theme="light"] .text-emerald-400 { color: #067647; }
+
+:root[data-theme="light"] .on-dark .text-white { color: #fff; }
+:root[data-theme="light"] .on-dark .text-red-300,
+:root[data-theme="light"] .on-dark .text-red-400 { color: #fca5a5; }
+
+/* ---------- Campos de formulario: borde con contraste (WCAG 1.4.11) ---------- */
+input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select,
+textarea,
+.auth-input {
+  border-color: var(--input-border);
+}
+.auth-input {
+  background: var(--color-canvas);
+  color: var(--fg);
+}
+.auth-input::placeholder { color: var(--color-muted); opacity: .85; }
+
+/* ---------- Barra de progreso del reproductor ---------- */
+.player-range {
+  background: linear-gradient(to right, var(--range-fill) 0%, var(--range-fill) var(--progress, 0%), var(--range-track) var(--progress, 0%), var(--range-track) 100%);
+}
+.player-range::-webkit-slider-thumb { background: var(--range-fill); }
+.player-range::-moz-range-thumb { background: var(--range-fill); border: 0; width: .9rem; height: .9rem; border-radius: 50%; }
+
+/* ---------- Tamaño de texto (todo el diseño usa rem, así que escala completo) ---------- */
+html[data-text="large"]  { font-size: 112.5%; }
+html[data-text="xlarge"] { font-size: 125%; }
+
+/* Los textos de 9, 10 y 11 px quedan demasiado chicos: mínimo legible y escalable */
+.text-\[9px\], .text-\[10px\] { font-size: .6875rem; }
+.text-\[11px\] { font-size: .75rem; }
+
+/* ---------- Espaciado de texto (WCAG 1.4.12; ayuda con dislexia y baja visión) ---------- */
+html[data-spacing="on"] body,
+html[data-spacing="on"] body * {
+  letter-spacing: .02em;
+  word-spacing: .1em;
+}
+html[data-spacing="on"] p,
+html[data-spacing="on"] li,
+html[data-spacing="on"] label,
+html[data-spacing="on"] span { line-height: 1.6; }
+
+/* ---------- Foco visible en TODO (teclado) ---------- */
+:focus-visible {
+  outline: 3px solid var(--focus) !important;
+  outline-offset: 2px !important;
+  border-radius: 6px;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 1px !important; }
+
+/* ---------- Enlace "Saltar al contenido" ---------- */
+.skip-link {
+  position: fixed; left: 1rem; top: -4rem; z-index: 2000;
+  padding: .75rem 1.25rem; border-radius: 999px;
+  background: var(--color-accent); color: #000; font-weight: 800; font-size: .875rem;
+  transition: top .15s ease;
+}
+.skip-link:focus { top: 1rem; }
+
+/* ---------- Solo para lectores de pantalla ---------- */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Barra del anuncio emergente (pausable) ---------- */
+@keyframes nt-ad-bar { from { width: 0; } to { width: 100%; } }
+.nt-ad-bar { animation-name: nt-ad-bar; animation-timing-function: linear; animation-fill-mode: forwards; }
+
+/* ---------- Reducir movimiento (preferencia manual del panel) ---------- */
+html[data-motion="reduce"] *,
+html[data-motion="reduce"] *::before,
+html[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+html[data-motion="reduce"] .nt-glow,
+html[data-motion="reduce"] .nt-bubble,
+html[data-motion="reduce"] .nt-spark { animation: none !important; }
+
+/* ---------- Alto contraste del sistema operativo (Windows) ---------- */
+@media (forced-colors: active) {
+  :focus-visible { outline: 3px solid Highlight !important; }
+  button, input, select, textarea { border: 1px solid ButtonText; }
+}
+
+/* ---------- Opciones del panel de Accesibilidad (radios e interruptores) ---------- */
+.nt-opt:has(input:focus-visible) .nt-opt-card {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* El contenedor principal recibe foco solo al "saltar al contenido": sin anillo grande */
+main:focus-visible { outline: none !important; }
+
+/* Con texto grande, los 6 botones del reproductor pasan a 3 columnas para no cortarse */
+html[data-text="large"] .nt-actions,
+html[data-text="xlarge"] .nt-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 1rem; }
+
+/* ---------- Sombras (Tailwind las escribe fijas, por eso se ajustan por clase) ---------- */
+:root[data-theme="light"] .shadow-glow { box-shadow: 0 4px 14px rgba(255, 106, 0, 0.3); }
+:root[data-theme="light"] .shadow-glow-sm { box-shadow: 0 2px 8px rgba(255, 106, 0, 0.22); }
+:root[data-theme="light"] .shadow-card { box-shadow: 0 10px 28px rgba(60, 40, 20, 0.14); }
+:root[data-theme="light"] .on-dark .shadow-card { box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28); }
+:root[data-theme="contrast"] .shadow-glow,
+:root[data-theme="contrast"] .shadow-glow-sm,
+:root[data-theme="contrast"] .shadow-card { box-shadow: none; }
