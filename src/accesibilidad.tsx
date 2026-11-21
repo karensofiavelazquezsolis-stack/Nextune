@@ -9,7 +9,7 @@
 // =====================================================================
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { LanguageSelector, useI18n } from "./i18n";
+import { useI18n } from "./i18n";
 
 // ───────────── PREFERENCIAS ─────────────
 export type ThemePref = "auto" | "dark" | "light" | "contrast";
@@ -280,8 +280,6 @@ export function AccessibilityPanel({ onClose }: { onClose: () => void }) {
           </div>
           <p className="mt-3 rounded-xl bg-canvas p-3 text-sm text-white">{t("a11y.sample")}</p>
         </fieldset>
-
-        <LanguageSelector />
 
         <fieldset className="mt-6">
           <legend className="text-xs font-bold uppercase tracking-widest text-muted">{t("a11y.readingMotion")}</legend>

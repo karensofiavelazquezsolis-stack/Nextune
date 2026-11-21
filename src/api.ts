@@ -12,7 +12,7 @@ export async function api<T = any>(url: string, method = "GET", body?: unknown):
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new Error("No se pudo conectar con el servidor");
+    throw new Error("No se pudo conectar con el servidor. Revisa tu conexión a Internet e inténtalo de nuevo.");
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Error del servidor");

@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import nodemailer from 'nodemailer';
 import 'dotenv/config';
+import dns from 'node:dns';
+dns.setDefaultResultOrder('ipv4first');
 import { pool, q } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1029,7 +1031,7 @@ async function listarUsuarios() {
 app.get('/api/admin/resumen', auth, adminOnly, h(async (_req, res) => {
   const [[u], [p], [ing], [c], [a], [ad]] = await Promise.all([
     q('SELECT COUNT(*) AS n FROM Usuario'),
-    q("SELECT COUNT(DISTINCT id_usuario) AS n FROM Suscripcion WHERE estado = 'activa' AND fecha_fin >= CURDATE()"),
+    q("SELECT COUNT(DISTINCT s.id_usuario) AS n FROM Suscripcion s JOIN Usuario u ON u.id_usuario = s.id_usuario WHERE u.id_rol <> 1 AND s.estado = 'activa' AND s.fecha_fin >= CURDATE()"),
     q("SELECT COALESCE(SUM(monto), 0) AS n FROM Pago WHERE estado = 'aprobado'"),
     q('SELECT COUNT(*) AS n FROM Cancion'),
     q('SELECT COUNT(*) AS n FROM Album'),
@@ -1050,11 +1052,34 @@ app.get('/api/admin/resumen', auth, adminOnly, h(async (_req, res) => {
 
 app.get('/api/admin/usuarios', auth, adminOnly, h(async (_req, res) => res.json(await listarUsuarios())));
 
-app.post('/api/admin/usuarios', auth, adminOnly, h(async (_req, res) => {
-  const hash = await bcrypt.hash('demo123', 10);
-  const n = Date.now() % 100000;
-  await q("INSERT INTO Usuario (nombre, correo, contrasena_hash, id_rol) VALUES ('Nuevo usuario', ?, ?, 2)", [`nuevo${n}@ejemplo.com`, hash]);
-  res.json({ ok: true });
+app.post('/api/admin/usuarios', auth, adminOnly, h(async (req, res) => {
+  const nombre = String(req.body.nombre || '').trim();
+  const correo = String(req.body.correo || '').trim().toLowerCase();
+  const telefono = String(req.body.telefono || '').trim();
+  const fecha_nacimiento = String(req.body.fecha_nacimiento || '').trim();
+  const contrasena = String(req.body.contrasena || '');
+  const role = req.body.role || 'Usuario normal';
+  if (nombre.length < 2) return fail(res, 400, 'Escribe el nombre del usuario');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(correo)) return fail(res, 400, 'Escribe un correo válido');
+  if (contrasena.length < 6) return fail(res, 400, 'La contraseña debe tener 6 o más caracteres');
+  if (!ROLES.includes(role)) return fail(res, 400, 'Rol inválido');
+  if (fecha_nacimiento && !/^\d{4}-\d{2}-\d{2}$/.test(fecha_nacimiento)) return fail(res, 400, 'Fecha de nacimiento inválida');
+  if ((await q('SELECT 1 FROM Usuario WHERE correo = ?', [correo])).length) return fail(res, 409, 'Ese correo ya está registrado');
+  const hash = await bcrypt.hash(contrasena, 10);
+  const r = await q('INSERT INTO Usuario (nombre, correo, telefono, fecha_nacimiento, contrasena_hash, id_rol) VALUES (?,?,?,?,?,?)',
+    [nombre, correo, telefono || null, fecha_nacimiento || null, hash, role === 'Administrador' ? 1 : 2]);
+  if (role === 'Usuario Premium') await activarPremium(r.insertId);
+  res.json({ ok: true, id: r.insertId });
+}));
+
+// Borra los usuarios de demostración (@ejemplo.com). No toca administradores ni al admin actual.
+app.delete('/api/admin/usuarios-demo', auth, adminOnly, h(async (req, res) => {
+  const demo = await q("SELECT id_usuario FROM Usuario WHERE correo LIKE '%@ejemplo.com' AND id_rol <> 1 AND id_usuario <> ?", [req.user.id_usuario]);
+  for (const d of demo) {
+    await limpiarDatosSociales(d.id_usuario);
+    await q('DELETE FROM Usuario WHERE id_usuario = ?', [d.id_usuario]);
+  }
+  res.json({ ok: true, eliminados: demo.length });
 }));
 
 app.put('/api/admin/usuarios/:id/rol', auth, adminOnly, h(async (req, res) => {
@@ -1314,6 +1339,96 @@ app.get('/api/external/canciones', h(async (req, res) => {
   res.json(data);
 }));
 
+// ---------- ENLACES DE AUDIO CADUCADOS ----------
+// Los enlaces de audio de Deezer llevan una firma que CADUCA. Si una canción guardada (playlist, favoritos,
+// historial) deja de sonar, el frontend pide aquí un enlace nuevo buscando la misma canción por título y artista.
+const normalizarTexto = (s = '') => quitarAcentos(String(s)).toLowerCase().replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+app.get('/api/external/resolver', h(async (req, res) => {
+  const titulo = String(req.query.titulo || '').trim();
+  const artista = String(req.query.artista || '').trim();
+  if (!titulo) return fail(res, 400, 'Falta el título de la canción');
+
+  const t = normalizarTexto(titulo);
+  const a = normalizarTexto(artista);
+  const coincide = (nombre, autor) => {
+    const n = normalizarTexto(nombre);
+    const x = normalizarTexto(autor);
+    return n && (n.includes(t) || t.includes(n)) && (!a || x.includes(a) || a.includes(x));
+  };
+  const getJson = (url) => fetch(url, { signal: AbortSignal.timeout(8000) }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const consulta = encodeURIComponent(`${artista} ${titulo}`.trim());
+
+  const [it, dz] = await Promise.all([
+    getJson(`https://itunes.apple.com/search?term=${consulta}&entity=song&limit=10&country=MX`),
+    getJson(`https://api.deezer.com/search?q=${consulta}&limit=10`),
+  ]);
+
+  // iTunes primero: sus enlaces de vista previa no caducan
+  const deItunes = (it?.results || []).find((r) => r.previewUrl && coincide(r.trackName, r.artistName));
+  if (deItunes) return res.json({ file: deItunes.previewUrl, fuente: 'itunes' });
+  const deDeezer = (dz?.data || []).find((r) => r.preview && coincide(r.title, r.artist?.name));
+  if (deDeezer) return res.json({ file: deDeezer.preview, fuente: 'deezer' });
+
+  fail(res, 404, 'No se encontró un enlace de audio vigente para esta canción');
+}));
+
+// ---------- PROXY DE AUDIO (evita bloqueos del navegador y enlaces con firma) ----------
+// El navegador pide el audio a TU servidor (/api/audio?url=...) y el servidor lo descarga de Deezer/iTunes/Jamendo.
+// Así no lo bloquean las extensiones ni la prevención de rastreo de Edge, ni el rechazo (403) de Deezer por "hotlinking".
+// Solo acepta los proveedores de la lista HOSTS_AUDIO (la misma que usan las descargas).
+app.get('/api/audio', async (req, res) => {
+  const MAX_REDIRECCIONES = 3;
+  let destino;
+  try { destino = new URL(String(req.query.url || '')); } catch { return fail(res, 400, 'Enlace de audio no válido'); }
+
+  const ctrl = new AbortController();
+  res.on('close', () => ctrl.abort());
+  const headers = { 'User-Agent': 'Mozilla/5.0 (NextTune)', Accept: '*/*' };
+  if (req.headers.range) headers.Range = req.headers.range; // permite adelantar/retroceder la canción
+
+  try {
+    let upstream = null;
+    for (let i = 0; i <= MAX_REDIRECCIONES; i++) {
+      if (!hostPermitido(destino.href)) return fail(res, 403, 'Proveedor de audio no permitido');
+      // El tiempo límite solo vigila la espera de la respuesta; una vez que llega, el audio puede tardar lo que necesite en bajar
+      for (let intento = 0; ; intento++) {
+        const espera = new AbortController();
+        const timer = setTimeout(() => { console.warn('[audio] el proveedor tardó más de 30 s:', destino.href); espera.abort(); }, 30000);
+        try {
+          upstream = await fetch(destino, { headers, redirect: 'manual', signal: AbortSignal.any([ctrl.signal, espera.signal]) });
+          break;
+        } catch (err) {
+          if (ctrl.signal.aborted || intento >= 1) throw err; // un segundo intento por si el proveedor tardó
+        } finally { clearTimeout(timer); }
+      }
+      if (upstream.status >= 300 && upstream.status < 400 && upstream.headers.get('location')) {
+        destino = new URL(upstream.headers.get('location'), destino);
+        continue;
+      }
+      break;
+    }
+    if (!upstream || (!upstream.ok && upstream.status !== 206)) {
+            console.warn('[audio] el proveedor respondió', upstream?.status, destino.href);
+      const code = upstream?.status === 403 || upstream?.status === 404 ? upstream.status : 502;
+      return fail(res, code, 'El proveedor no entregó el audio');
+    }
+    res.status(upstream.status);
+    for (const nombre of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+      const v = upstream.headers.get(nombre);
+      if (v) res.setHeader(nombre, v);
+    }
+    if (!upstream.headers.get('accept-ranges')) res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    Readable.fromWeb(upstream.body).on('error', () => res.destroy()).pipe(res);
+    } catch (e) {
+    if (ctrl.signal.aborted) return; // el navegador canceló la petición (cambiaste de canción o adelantaste): es normal
+    console.error('[audio] error:', destino.href, e?.cause?.code || e?.cause?.message || e?.message);
+    if (!res.headersSent) fail(res, 502, 'No se pudo obtener el audio del proveedor');
+    else res.destroy();
+  }
+});
+
 // ---------- FRONTEND COMPILADO ----------
 app.use('/audio', express.static(AUDIO_DIR));
 app.use('/covers', express.static(COVERS_DIR));
@@ -1326,9 +1441,9 @@ if (fs.existsSync(dist)) {
 const PORT = Number(process.env.PORT || 3000);
 pool.query('SELECT 1').then(async () => {
   await crearTablasSociales();
-  console.log('✅ Conectado a MySQL');
+  console.log('Conectado a MySQL');
   app.listen(PORT, () => console.log(`🎵 API de NextTune en http://localhost:${PORT}`));
 }).catch((e) => {
-  console.error('❌ No se pudo conectar a MySQL:', e.message);
+  console.error('No se pudo conectar a MySQL:', e.message);
   process.exit(1);
 });
