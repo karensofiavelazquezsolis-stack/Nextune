@@ -674,7 +674,7 @@ function HeroCarousel({ onPlay }: { onPlay: (index: number) => void }) {
       onMouseLeave={() => setHovering(false)}
       onFocus={() => setHovering(true)}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHovering(false); }}
-      className="on-dark relative mt-6 overflow-hidden rounded-3xl border border-white/5 bg-panel p-6 transition-all duration-300 sm:p-8 shadow-xl"
+      className="on-dark relative isolate mt-6 overflow-hidden rounded-3xl border border-white/5 bg-panel p-6 transition-all duration-300 sm:p-8 shadow-xl"
     >
       {/* Imagen de fondo con gradiente oscuro encima para leer el texto */}
       <div className="absolute inset-0 z-0">
@@ -2149,12 +2149,12 @@ function FullPlayer({ song, playing, progress, onSeek, onToggle, onPrevious, onN
 
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
   return (
-    <div ref={dlg} role="dialog" aria-modal="true" aria-label={`Reproduciendo ${song.title}, de ${song.artist}`} className="fixed inset-0 z-[80] overflow-y-auto bg-canvas">
+    <div ref={dlg} role="dialog" aria-modal="true" aria-label={`Reproduciendo ${song.title}, de ${song.artist}`} className="fixed inset-0 z-[80] overflow-y-auto overflow-x-hidden bg-canvas">
       <div className="mx-auto flex min-h-full max-w-6xl flex-col px-5 py-5 sm:px-8">
         <div className="flex items-center justify-between"><button onClick={onClose} aria-label="Cerrar reproductor" className="rounded-full bg-panel p-3 text-muted hover:text-white"><Icon name="arrow" /></button><div className="text-center"><p className="text-[10px] font-bold uppercase tracking-[.2em] text-muted">Reproduciendo desde</p><p className="text-xs font-bold text-white">Mezcla para ti</p></div><button onClick={() => setView(view === "info" ? "cover" : "info")} aria-label="Información de la canción" aria-pressed={view === "info"} className="rounded-full p-3 text-muted"><Icon name="more" /></button></div>
-        <div className="my-auto grid items-center gap-4 py-3 lg:grid-cols-[minmax(20rem,31rem)_1fr] lg:gap-16 lg:py-7">
+        <div className="my-auto grid items-center gap-4 py-3 grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(20rem,31rem)_minmax(0,1fr)] lg:gap-16 lg:py-7">
           <div className="hidden lg:block"><Cover song={song} className="mx-auto aspect-square w-full max-w-lg rounded-[2rem] shadow-[0_30px_100px_rgba(255,106,0,.15)]" /></div>
-          <div className="mx-auto w-full max-w-xl">
+          <div className="mx-auto w-full min-w-0 max-w-xl">
             <div className="flex items-center gap-3"><Cover song={song} className="size-14 shrink-0 rounded-xl lg:hidden" /><div className="min-w-0 flex-1"><h1 className="truncate text-xl font-black text-white sm:text-3xl">{song.title}</h1><p className="mt-1 truncate text-sm font-medium text-muted">{song.artist} · {song.album}</p></div><button onClick={onFav} aria-label={fav ? "Quitar de favoritas" : "Agregar a favoritas"} aria-pressed={fav} className={`shrink-0 p-2 ${fav ? "text-accent" : "text-muted"}`}><Icon name="heart" filled={fav} size={24} /></button></div>
             <div className="mt-4 lg:mt-7"><input aria-label="Progreso de reproducción" aria-valuetext={`${formatTime(progress)} de ${formatTime(song.duration)}`} type="range" min="0" max={song.duration} value={progress} onChange={(e) => onSeek(Number(e.target.value))} style={{ ["--progress" as string]: `${Math.min(100, (progress / Math.max(1, song.duration)) * 100)}%` }} className="player-range w-full" /><div className="mt-2 flex justify-between text-[11px] text-muted"><span>{formatTime(progress)}</span><span>-{formatTime(Math.max(0, song.duration - progress))}</span></div></div>
             <div className="mt-4 lg:mt-7">
@@ -2854,6 +2854,15 @@ function ShareSheet({ song, onClose, onShared, notify, friends, onSendFriend }: 
 export default function App() {
   usePlans();
   useEffect(() => { void loadPlans(); }, []);
+  // Teléfono: la página siempre se ajusta al ancho de la pantalla (sin tener que acercar o alejar con los dedos)
+  useEffect(() => {
+    let m = document.querySelector('meta[name="viewport"]');
+    if (!m) { m = document.createElement("meta"); m.setAttribute("name", "viewport"); document.head.appendChild(m); }
+    m.setAttribute("content", "width=device-width, initial-scale=1, viewport-fit=cover");
+    document.documentElement.style.overflowX = "clip";
+    document.body.style.overflowX = "clip";
+    document.documentElement.style.maxWidth = "100%";
+  }, []);
   // Service worker: guarda la app en el dispositivo para que abra aunque no haya internet
   useEffect(() => {
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -3474,7 +3483,7 @@ export default function App() {
   if (!currentSong) return <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-canvas p-6 text-center text-sm text-muted">No hay canciones disponibles. Revisa que los endpoints <code className="text-accent">/canciones</code> y <code className="text-accent">/external/canciones</code> estén respondiendo.<Button onClick={logout}>Salir</Button></div>;
 
   return (
-    <div className="min-h-screen bg-canvas text-white">
+    <div className="min-h-screen overflow-x-clip bg-canvas text-white">
       <SkipLink />
       <audio
         ref={audioRef}
@@ -3522,7 +3531,7 @@ export default function App() {
         <Header onAccount={() => setAccountOpen(true)} premium={premium} user={user} avatar={avatar} unread={unread} onBell={openNotifs} />
         {isOffline && <div role="status" className="sticky top-20 z-20 flex items-center justify-center gap-2 border-b border-accent/20 bg-accent px-4 py-2 text-center text-xs font-black text-black"><Icon name="offline" size={16} /> Modo sin conexión: reproduciendo canciones descargadas.</div>}
         {expired && <div role="status" className="flex items-center justify-center gap-3 border-b border-accent/20 bg-accent/10 px-4 py-3 text-center text-xs font-bold text-accent">Tu membresía venció. Renuévala. <button onClick={() => navigate("membresia")} className="underline">Ver planes</button></div>}
-        <main id="contenido" tabIndex={-1} className="mx-auto max-w-[90rem] px-4 pb-52 pt-6 sm:px-7 lg:px-10 lg:pb-32">
+        <main id="contenido" tabIndex={-1} className="mx-auto min-w-0 max-w-[90rem] px-4 pb-52 pt-6 sm:px-7 lg:px-10 lg:pb-32">
           {screen === "inicio" && <Home onPlay={playSong} favs={favs} />}
           {screen === "busqueda" && <SearchScreen onPlay={playSong} onQueue={addToQueue} />}
           {screen === "biblioteca" && (
