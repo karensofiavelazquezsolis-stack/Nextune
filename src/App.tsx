@@ -3229,7 +3229,10 @@ export default function App() {
 
     const cancionesLocales = localRows.map((item) => ({ ...item, full: true }));
     const vistos = new Set<Id>();
-    const todas = [...cancionesLocales, ...externalRows, ...(fallback?.catalog ?? [])].filter((item) => {
+    // Con internet solo se conservan del respaldo las canciones descargadas: el resto lo manda el servidor
+    // (así no aparecen canciones viejas cuyo archivo ya no existe)
+    const respaldo = (fallback?.catalog ?? []).filter((x) => !navigator.onLine || (!localRows.length && !externalRows.length) || d.includes(x.id));
+    const todas = [...cancionesLocales, ...externalRows, ...respaldo].filter((item) => {
       if (vistos.has(item.id)) return false;
       vistos.add(item.id);
       return true;
