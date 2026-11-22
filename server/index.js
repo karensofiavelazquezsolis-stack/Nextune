@@ -5,7 +5,6 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
-import nodemailer from 'nodemailer';
 import 'dotenv/config';
 import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first');
@@ -29,22 +28,33 @@ if (!process.env.JAMENDO_CLIENT_ID) {
   console.warn('⚠️ Falta JAMENDO_CLIENT_ID en .env: solo se usarán Deezer e iTunes');
 }
 
-// ---------- CONFIGURACIÓN DE NODEMAILER ----------
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+// ---------- ENVÍO DE CORREO (API HTTP de Brevo) ----------
+// Railway bloquea SMTP, así que se envía por HTTPS.
+const transporter = {
+  async sendMail({ to, subject, html }) {
+    const r = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        sender: { name: 'NextTune Soporte', email: process.env.EMAIL_FROM },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+      }),
+    });
+    if (!r.ok) throw new Error(`Brevo ${r.status}: ${await r.text()}`);
   },
-});
+};
 
-transporter.verify((error) => {
-  if (error) {
-    console.error('❌ Error en la configuración de correo (Nodemailer):', error.message);
-  } else {
-    console.log('📧 Servidor listo para enviar correos de recuperación');
-  }
-});
+if (!process.env.BREVO_API_KEY || !process.env.EMAIL_FROM) {
+  console.error('❌ Falta BREVO_API_KEY o EMAIL_FROM: no se enviarán correos');
+} else {
+  console.log('📧 Servidor listo para enviar correos de recuperación (Brevo)');
+}
 
 // ---------- HELPERS Y ESTADO DE SESIÓN ----------
 const pub = (u) => ({
@@ -265,7 +275,7 @@ app.post('/api/recuperar', h(async (req, res) => {
 
     try {
       await transporter.sendMail({
-        from: `"NextTune Soporte" <${process.env.EMAIL_USER}>`,
+        from: `"NextTune Soporte" <${process.env.EMAIL_FROM}>`,
         to: correo,
         subject: 'Tu código de recuperación - NextTune',
         html: `
@@ -278,7 +288,7 @@ app.post('/api/recuperar', h(async (req, res) => {
         `,
       });
     } catch (mailError) {
-      console.error('❌ Error al enviar correo con Nodemailer:', mailError);
+      console.error('❌ Error al enviar correo:', mailError);
       return fail(res, 500, 'No se pudo enviar el correo. Intenta de nuevo.');
     }
   }
