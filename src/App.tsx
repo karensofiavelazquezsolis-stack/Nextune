@@ -2908,6 +2908,8 @@ export default function App() {
   const downloadsRef = useRef<Set<Id>>(new Set());
   downloadsRef.current = downloads;
   const controlsRef = useRef<{ next: () => void; previous: () => void }>({ next: () => {}, previous: () => {} });
+  const playingRef = useRef(false);
+  playingRef.current = playing;
   const loopRef = useRef<Song[] | null>(null); // playlist o álbum que se está escuchando: al terminar vuelve a empezar
   const roleRef = useRef<string | null>(null);
   const adRef = useRef(false);
@@ -2986,6 +2988,7 @@ export default function App() {
             blobUrlRef.current = objUrl;
             audio.src = objUrl;
             audio.load();
+            if (playingRef.current) audio.play().catch(() => {});
             return;
           }
         } catch {}
@@ -3005,15 +3008,29 @@ export default function App() {
       // 3. En línea: reproducimos normalmente
       audio.src = srcUrl;
       audio.load();
+      if (playingRef.current) audio.play().catch(() => {}); // arranca ya, sin esperar a que termine de cargar
     })();
 
     return () => { cancel = true; };
   }, [current, role, isOffline, premium]);
 
+  // Precarga la siguiente canción (solo archivos propios) para que arranque al instante
+  const prefetchRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    if (!role || role === "admin" || isOffline || !started) return;
+    if (shuffleRef.current && queue.length === 0) return; // con aleatorio no se sabe cuál sigue
+    const next = queue[0] ?? songs[getNextIndex(current)];
+    if (!next || next.id === songs[current]?.id) return;
+    const src = audioSrc(next);
+    if (!src || src.startsWith("/api/")) return;
+    if (!prefetchRef.current) { prefetchRef.current = new Audio(); prefetchRef.current.preload = "auto"; }
+    if (prefetchRef.current.getAttribute("src") !== src) { prefetchRef.current.src = src; prefetchRef.current.load(); }
+  }, [current, queue, started, isOffline, role]);
+
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (playing && hasAudio) audio.play().catch(() => {});
+    if (playing) audio.play().catch(() => {});
     else audio.pause();
   }, [playing, hasAudio, current]);
 
@@ -3461,7 +3478,7 @@ export default function App() {
       <SkipLink />
       <audio
         ref={audioRef}
-        preload="metadata"
+        preload="auto"
         onLoadedData={() => { failures.current = 0; setHasAudio(true); }}
         onError={(e) => {
           const a = e.currentTarget;

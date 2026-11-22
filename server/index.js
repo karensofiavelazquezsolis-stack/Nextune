@@ -1440,8 +1440,9 @@ app.get('/api/audio', async (req, res) => {
 });
 
 // ---------- FRONTEND COMPILADO ----------
-app.use('/audio', express.static(AUDIO_DIR));
-app.use('/covers', express.static(COVERS_DIR));
+// Con caché de 7 días: la 2.ª vez que suena una canción (o una portada) carga al instante
+app.use('/audio', express.static(AUDIO_DIR, { maxAge: '7d' }));
+app.use('/covers', express.static(COVERS_DIR, { maxAge: '7d' }));
 const dist = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(dist)) {
   app.use(express.static(dist));
