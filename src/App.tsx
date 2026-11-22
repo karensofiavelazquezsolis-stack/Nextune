@@ -368,11 +368,13 @@ function SongCard({
   onPlay,
   onQueue,
   compact = false,
+  fluid = false,
 }: {
   song: Song;
   onPlay: () => void;
   onQueue?: () => void;
   compact?: boolean;
+  fluid?: boolean;
 }) {
   if (compact) {
     return (
@@ -397,7 +399,7 @@ function SongCard({
     );
   }
   return (
-    <button onClick={onPlay} className="group w-36 shrink-0 text-left sm:w-40 lg:w-44">
+    <button onClick={onPlay} className={`group text-left ${fluid ? "w-full min-w-0 sm:w-40 sm:shrink-0 lg:w-44" : "w-36 shrink-0 sm:w-40 lg:w-44"}`}>
       <div className="relative">
         <Cover song={song} className="aspect-square w-full rounded-2xl shadow-card" />
         <span className="absolute bottom-3 right-3 flex size-10 translate-y-2 items-center justify-center rounded-full bg-accent text-black opacity-0 shadow-glow transition group-hover:translate-y-0 group-focus-visible:translate-y-0 group-hover:opacity-100 group-focus-visible:opacity-100">
@@ -765,8 +767,8 @@ function Home({ onPlay, favs }: { onPlay: (index: number) => void; favs: Set<Id>
         <section className="mt-6">
           <h1 className="text-3xl font-black text-white">{genre}</h1>
           <p className="mt-1 text-sm text-muted">{ext.loading ? "Buscando canciones..." : `${genreSongs.length} ${genreSongs.length === 1 ? "canción" : "canciones"}`}</p>
-          <div className="mt-6 flex flex-wrap gap-4">
-            {genreSongs.map((song) => <SongCard key={song.id} song={song} onPlay={() => onPlay(songIndex(song))} />)}
+          <div className="mt-6 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap">
+            {genreSongs.map((song) => <SongCard fluid key={song.id} song={song} onPlay={() => onPlay(songIndex(song))} />)}
           </div>
           {!ext.loading && !genreSongs.length && <p className="mt-6 rounded-2xl border border-dashed border-line p-8 text-center text-sm text-muted">No encontramos canciones de este género.</p>}
         </section>
@@ -936,7 +938,7 @@ function PlaylistDetail({
 }: {
   id: number;
   onBack: () => void;
-  onPlayList: (list: Song[]) => void;
+  onPlayList: (list: Song[], loop?: Song[]) => void;
   onQueue: (song: Song) => void;
   onChanged: () => void;
   notify: (m: string) => void;
@@ -1096,7 +1098,7 @@ function PlaylistDetail({
         {data.songs.length ? data.songs.map((song, i) => (
           <div key={song.id} className="group flex items-center gap-3 rounded-xl p-2 hover:bg-panel">
             <span className="w-5 text-center text-xs text-muted">{i + 1}</span>
-            <button onClick={() => onPlayList(data.songs.slice(i))}><Cover song={song} className="size-12 rounded-lg" /></button>
+            <button onClick={() => onPlayList(data.songs.slice(i), data.songs)}><Cover song={song} className="size-12 rounded-lg" /></button>
             <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-white">{song.title}</p><p className="truncate text-xs text-muted">{song.artist} · {song.album}</p></div>
             <button onClick={() => onQueue(song)} title="Agregar a la cola" className="p-2 text-muted hover:text-accent"><Icon name="queue" size={18} /></button>
             <button onClick={() => removeSong(song)} title="Quitar de la playlist" className="p-2 text-muted hover:text-red-400"><Icon name="trash" size={18} /></button>
@@ -1135,7 +1137,7 @@ function Library({
   playlists: PlaylistItem[];
   downloads: Set<Id>;
   initialTab?: string;
-  onPlayList: (list: Song[]) => void;
+  onPlayList: (list: Song[], loop?: Song[]) => void;
   onPlaylistsChanged: () => void;
   friends: Friend[];
   onAddToPlaylist: (song: Song) => void;
@@ -2091,7 +2093,8 @@ function PlayerControls({ playing, isShuffle, isRepeat, onTogglePlay, onNext, on
 
 function FullPlayer({ song, playing, progress, onSeek, onToggle, onPrevious, onNext, onClose, notify, premium, onPremium, fav, onFav, onAddPlaylist, onShare, onOutput, onDownload, isShuffle, isRepeat, onToggleShuffle, onToggleRepeat, queue, setQueue, onAddToQueue }: { song: Song; playing: boolean; progress: number; onSeek: (value: number) => void; onToggle: () => void; onPrevious: () => void; onNext: () => void; onClose: () => void; notify: (message: string) => void; premium: boolean; onPremium: () => void; fav: boolean; onFav: () => void; onAddPlaylist: () => void; onShare: () => void; onOutput: () => void; onDownload: () => void; isShuffle: boolean; isRepeat: boolean; onToggleShuffle: () => void; onToggleRepeat: () => void; queue: Song[]; setQueue: React.Dispatch<React.SetStateAction<Song[]>>; onAddToQueue: (song: Song) => void }) {
   const dlg = useDialog<HTMLDivElement>(onClose);
-  const [view, setView] = useState<"cover" | "lyrics" | "queue" | "info">("cover");
+  // En el teléfono la letra se ve de entrada (como en Spotify); en pantallas grandes se abre con el botón
+  const [view, setView] = useState<"cover" | "lyrics" | "queue" | "info">(() => (typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches ? "lyrics" : "cover"));
   const savedAlbums = useSavedAlbums();
   const [pickQueue, setPickQueue] = useState(false);
   const moveQueueItem = (position: number, direction: -1 | 1) => {
@@ -2149,12 +2152,12 @@ function FullPlayer({ song, playing, progress, onSeek, onToggle, onPrevious, onN
     <div ref={dlg} role="dialog" aria-modal="true" aria-label={`Reproduciendo ${song.title}, de ${song.artist}`} className="fixed inset-0 z-[80] overflow-y-auto bg-canvas">
       <div className="mx-auto flex min-h-full max-w-6xl flex-col px-5 py-5 sm:px-8">
         <div className="flex items-center justify-between"><button onClick={onClose} aria-label="Cerrar reproductor" className="rounded-full bg-panel p-3 text-muted hover:text-white"><Icon name="arrow" /></button><div className="text-center"><p className="text-[10px] font-bold uppercase tracking-[.2em] text-muted">Reproduciendo desde</p><p className="text-xs font-bold text-white">Mezcla para ti</p></div><button onClick={() => setView(view === "info" ? "cover" : "info")} aria-label="Información de la canción" aria-pressed={view === "info"} className="rounded-full p-3 text-muted"><Icon name="more" /></button></div>
-        <div className="my-auto grid items-center gap-8 py-7 lg:grid-cols-[minmax(20rem,31rem)_1fr] lg:gap-16">
-          <div><Cover song={song} className="mx-auto aspect-square w-full max-w-lg rounded-[2rem] shadow-[0_30px_100px_rgba(255,106,0,.15)]" /></div>
+        <div className="my-auto grid items-center gap-4 py-3 lg:grid-cols-[minmax(20rem,31rem)_1fr] lg:gap-16 lg:py-7">
+          <div className="hidden lg:block"><Cover song={song} className="mx-auto aspect-square w-full max-w-lg rounded-[2rem] shadow-[0_30px_100px_rgba(255,106,0,.15)]" /></div>
           <div className="mx-auto w-full max-w-xl">
-            <div className="flex items-center justify-between"><div><h1 className="text-2xl font-black text-white sm:text-3xl">{song.title}</h1><p className="mt-1 text-sm font-medium text-muted">{song.artist} · {song.album}</p></div><button onClick={onFav} aria-label={fav ? "Quitar de favoritas" : "Agregar a favoritas"} aria-pressed={fav} className={`p-2 ${fav ? "text-accent" : "text-muted"}`}><Icon name="heart" filled={fav} size={24} /></button></div>
-            <div className="mt-7"><input aria-label="Progreso de reproducción" aria-valuetext={`${formatTime(progress)} de ${formatTime(song.duration)}`} type="range" min="0" max={song.duration} value={progress} onChange={(e) => onSeek(Number(e.target.value))} style={{ ["--progress" as string]: `${Math.min(100, (progress / Math.max(1, song.duration)) * 100)}%` }} className="player-range w-full" /><div className="mt-2 flex justify-between text-[11px] text-muted"><span>{formatTime(progress)}</span><span>-{formatTime(Math.max(0, song.duration - progress))}</span></div></div>
-            <div className="mt-7">
+            <div className="flex items-center gap-3"><Cover song={song} className="size-14 shrink-0 rounded-xl lg:hidden" /><div className="min-w-0 flex-1"><h1 className="truncate text-xl font-black text-white sm:text-3xl">{song.title}</h1><p className="mt-1 truncate text-sm font-medium text-muted">{song.artist} · {song.album}</p></div><button onClick={onFav} aria-label={fav ? "Quitar de favoritas" : "Agregar a favoritas"} aria-pressed={fav} className={`shrink-0 p-2 ${fav ? "text-accent" : "text-muted"}`}><Icon name="heart" filled={fav} size={24} /></button></div>
+            <div className="mt-4 lg:mt-7"><input aria-label="Progreso de reproducción" aria-valuetext={`${formatTime(progress)} de ${formatTime(song.duration)}`} type="range" min="0" max={song.duration} value={progress} onChange={(e) => onSeek(Number(e.target.value))} style={{ ["--progress" as string]: `${Math.min(100, (progress / Math.max(1, song.duration)) * 100)}%` }} className="player-range w-full" /><div className="mt-2 flex justify-between text-[11px] text-muted"><span>{formatTime(progress)}</span><span>-{formatTime(Math.max(0, song.duration - progress))}</span></div></div>
+            <div className="mt-4 lg:mt-7">
               <PlayerControls
                 playing={playing}
                 isShuffle={isShuffle}
@@ -2166,10 +2169,10 @@ function FullPlayer({ song, playing, progress, onSeek, onToggle, onPrevious, onN
                 onToggleRepeat={onToggleRepeat}
               />
             </div>
-            <div className="nt-actions mt-8 grid grid-cols-6 gap-2 border-t border-line pt-6">
+            <div className="nt-actions mt-5 grid grid-cols-6 gap-2 border-t border-line pt-4 lg:mt-8 lg:pt-6">
               {[["share", "Compartir"], ["plus", "Playlist"], ["download", "Descargar"], ["device", "Salida"], ["lyrics", "Letra"], ["queue", "Cola"]].map(([icon, label]) => <button key={label} onClick={() => label === "Letra" ? setView(view === "lyrics" ? "cover" : "lyrics") : label === "Cola" ? setView(view === "queue" ? "cover" : "queue") : label === "Descargar" ? handleDownload() : label === "Playlist" ? onAddPlaylist() : label === "Compartir" ? onShare() : onOutput()} className={`flex flex-col items-center gap-2 text-[9px] font-semibold ${view === label.toLowerCase() ? "text-accent" : "text-muted hover:text-white"}`}><Icon name={icon as IconName} size={19} />{label}</button>)}
             </div>
-            {view === "lyrics" && <div ref={lyricsBox} role="region" aria-label="Letra de la canción" tabIndex={0} className="relative mt-6 h-64 overflow-y-auto rounded-2xl bg-panel p-5">
+            {view === "lyrics" && <div ref={lyricsBox} role="region" aria-label="Letra de la canción" tabIndex={0} className="relative mt-4 h-[36vh] min-h-44 overflow-y-auto rounded-2xl bg-panel p-5 lg:mt-6 lg:h-64">
               <p className="text-xs font-bold uppercase tracking-widest text-accent">Letra{lyrics.synced.length > 0 && " · sincronizada"}</p>
               <div className="mt-4 space-y-3">
                 {lyrics.loading ? <p className="text-sm text-muted">Buscando letra...</p>
@@ -2905,6 +2908,7 @@ export default function App() {
   const downloadsRef = useRef<Set<Id>>(new Set());
   downloadsRef.current = downloads;
   const controlsRef = useRef<{ next: () => void; previous: () => void }>({ next: () => {}, previous: () => {} });
+  const loopRef = useRef<Song[] | null>(null); // playlist o álbum que se está escuchando: al terminar vuelve a empezar
   const roleRef = useRef<string | null>(null);
   const adRef = useRef(false);
   const currentSong: Song | undefined = songs[current] || songs[0];
@@ -3109,7 +3113,7 @@ export default function App() {
   };
   const goPremiumFromAd = () => { closeAd(); setPlayerOpen(false); setAccountOpen(false); navigate("pago"); };
 
-  const playSong = (index: number) => { if (index < 0 || !songs[index]) return; setCurrent(index); setProgress(0); setPlaying(true); setStarted(true); };
+  const playSong = (index: number) => { if (index < 0 || !songs[index]) return; loopRef.current = null; setCurrent(index); setProgress(0); setPlaying(true); setStarted(true); };
   const nextSong = () => {
     if (songs.length === 0) return;
     trackSongForAds();
@@ -3119,6 +3123,18 @@ export default function App() {
       const indexInSongs = songs.findIndex((s) => s.id === nextFromQueue.id);
       if (indexInSongs !== -1) {
         setCurrent(indexInSongs); setProgress(0); setPlaying(true);
+        return;
+      }
+    }
+    // Se acabó la playlist: vuelve a empezar con las mismas canciones (no pasa a otras del catálogo)
+    const loop = loopRef.current;
+    if (loop && loop.length) {
+      const order = shuffleRef.current ? [...loop].sort(() => Math.random() - 0.5) : loop;
+      const first = songIndex(order[0]);
+      if (first !== -1) {
+        setQueue(order.slice(1));
+        if (first === current) { restartSong(); return; }
+        setCurrent(first); setProgress(0); setPlaying(true);
         return;
       }
     }
@@ -3263,6 +3279,7 @@ export default function App() {
     setFavs(new Set()); setPlaylists([]); setDownloads(new Set());
     setFriends([]); setNotifs([]); setNotifOpen(false); setStarted(false);
     setQueue([]);
+    loopRef.current = null;
     logged.current = -1;
   };
 
@@ -3282,12 +3299,13 @@ export default function App() {
     return pl;
   };
 
-  const playList = (list: Song[]) => {
+  const playList = (list: Song[], loop?: Song[]) => {
     if (!list.length) return;
     const first = songIndex(list[0]);
     if (first === -1) return;
     setQueue(list.slice(1));
     playSong(first);
+    loopRef.current = loop ?? list;
   };
 
   const addSongToPlaylist = async (pl: PlaylistItem, song: Song) => {
