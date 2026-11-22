@@ -3023,19 +3023,6 @@ export default function App() {
     return () => { cancel = true; };
   }, [current, role, isOffline, premium]);
 
-  // Precarga la siguiente canción (solo archivos propios) para que arranque al instante
-  const prefetchRef = useRef<HTMLAudioElement | null>(null);
-  useEffect(() => {
-    if (!role || role === "admin" || isOffline || !started) return;
-    if (shuffleRef.current && queue.length === 0) return; // con aleatorio no se sabe cuál sigue
-    const next = queue[0] ?? songs[getNextIndex(current)];
-    if (!next || next.id === songs[current]?.id) return;
-    const src = audioSrc(next);
-    if (!src || src.startsWith("/api/")) return;
-    if (!prefetchRef.current) { prefetchRef.current = new Audio(); prefetchRef.current.preload = "auto"; }
-    if (prefetchRef.current.getAttribute("src") !== src) { prefetchRef.current.src = src; prefetchRef.current.load(); }
-  }, [current, queue, started, isOffline, role]);
-
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -3487,7 +3474,7 @@ export default function App() {
       <SkipLink />
       <audio
         ref={audioRef}
-        preload="auto"
+        preload="metadata"
         onLoadedData={() => { failures.current = 0; setHasAudio(true); }}
         onError={(e) => {
           const a = e.currentTarget;
